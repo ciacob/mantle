@@ -317,11 +317,15 @@ module.exports = {
 
     // Reinstall production dependencies so pkg can bundle them
     log.info('Installing production dependencies for pkg…');
-    shell('npm install --omit=dev', { cwd: buildDir });
+    shell('npm install --omit=dev', { cwd: buildDir, stream: true });
 
     // ── Step 4: Run pkg ─────────────────────────────────────────────────────
 
+    const pkgTarget = env.PKG_TARGET || 'node20-macos-arm64';
     log.info('Step 4/9 — Packaging with pkg');
+    log.info(`Target         : ${pkgTarget}`);
+    log.warn('First run may take ~10 min to build the Node.js base binary from source.');
+    log.warn('Subsequent runs use the pkg cache and complete in seconds.');
 
     const macOSDir   = path.join(outputDir, '_macos');
     const binaryName = safeName(env.APP_NAME);
@@ -330,10 +334,10 @@ module.exports = {
     await fs.mkdir(macOSDir, { recursive: true });
     shell(
       `"${env.PKG_BIN}" "${pkgJsonBuild}" ` +
-      `--target ${env.PKG_TARGET || 'node20-macos-arm64'} ` +
+      `--target ${pkgTarget} ` +
       `--no-bytecode ` +
       `--output "${binaryPath}"`,
-      { cwd: buildDir }
+      { cwd: buildDir, stream: true }
     );
     log.info(`Mach-O binary  : ${binaryPath}`);
 

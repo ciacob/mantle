@@ -92,6 +92,26 @@ test('runShell: returns trimmed stdout on success', () => {
   assert.equal(result, 'hello world');
 });
 
+test('runShell: returns empty string in streaming mode (stdio inherited)', () => {
+  const fakeExec = (_cmd, _opts) => null;
+  const result   = runShell('echo hello', { stream: true }, fakeExec);
+  assert.equal(result, '');
+});
+
+test('runShell: streaming mode uses inherit stdio', () => {
+  let capturedOpts;
+  const fakeExec = (_cmd, opts) => { capturedOpts = opts; return null; };
+  runShell('cmd', { stream: true }, fakeExec);
+  assert.equal(capturedOpts.stdio, 'inherit');
+});
+
+test('runShell: non-streaming mode uses pipe stdio', () => {
+  let capturedOpts;
+  const fakeExec = (_cmd, opts) => { capturedOpts = opts; return ''; };
+  runShell('cmd', {}, fakeExec);
+  assert.deepEqual(capturedOpts.stdio, ['pipe', 'pipe', 'pipe']);
+});
+
 test('runShell: throws on non-zero exit with stderr message', () => {
   const fakeExec = () => {
     const err    = new Error('Command failed');
@@ -101,6 +121,19 @@ test('runShell: throws on non-zero exit with stderr message', () => {
   assert.throws(
     () => runShell('bad-cmd', {}, fakeExec),
     /something went wrong/
+  );
+});
+
+test('runShell: streaming mode error includes exit code not output', () => {
+  const fakeExec = () => {
+    const err  = new Error('Command failed');
+    err.status = 1;
+    err.stdout = 'lots of output';
+    throw err;
+  };
+  assert.throws(
+    () => runShell('bad-cmd', { stream: true }, fakeExec),
+    /exited with code 1/
   );
 });
 

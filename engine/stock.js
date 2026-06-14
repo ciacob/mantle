@@ -88,18 +88,30 @@ function findMissingEnv(env) {
  * @returns {string}                      Trimmed stdout
  */
 function runShell(command, options = {}, execFn = execSync) {
+  // stream:true → inherit stdio so output appears in real time.
+  // Use for long-running commands (pkg, npm install, swift build, etc.)
+  // where you want progress visible rather than buffered.
+  const streaming = options.stream === true;
+
   try {
     const result = execFn(command, {
       cwd:      options.cwd,
       env:      options.env || process.env,
       encoding: 'utf8',
-      stdio:    ['pipe', 'pipe', 'pipe'],
-      ...options,
+      stdio:    streaming ? 'inherit' : ['pipe', 'pipe', 'pipe'],
     });
+    // In streaming mode execSync returns null (stdio not captured)
     return typeof result === 'string' ? result.trim() : '';
   } catch (err) {
-    // Collect all available output — pkg and similar tools often write
-    // their real error to stdout rather than stderr.
+    if (streaming) {
+      // stdio was inherited — output already appeared on terminal.
+      // Just surface the exit code / signal.
+      const reason = err.signal
+        ? `killed by signal ${err.signal}`
+        : `exited with code ${err.status ?? '?'}`;
+      throw new Error(`shell: command ${reason}\n  command: ${command}`);
+    }
+    // Buffered mode — include captured stdout + stderr in the error.
     const parts = [];
     if (err.stderr && String(err.stderr).trim()) parts.push(String(err.stderr).trim());
     if (err.stdout && String(err.stdout).trim()) parts.push(String(err.stdout).trim());
