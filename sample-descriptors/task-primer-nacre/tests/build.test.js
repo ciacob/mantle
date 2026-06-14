@@ -165,6 +165,21 @@ test('patchPackageJson: preserves top-level package.json fields', () => {
   assert.deepEqual(result.scripts, { test: 'jest' });
 });
 
+test('patchPackageJson: adds bin field from main when bin is absent', () => {
+  const result = patchPackageJson({ name: 'myapp', main: 'main.js' }, 'com.example.app');
+  assert.equal(result.bin, 'main.js');
+});
+
+test('patchPackageJson: falls back to main.js when neither bin nor main present', () => {
+  const result = patchPackageJson({ name: 'myapp' }, 'com.example.app');
+  assert.equal(result.bin, 'main.js');
+});
+
+test('patchPackageJson: preserves existing bin field', () => {
+  const result = patchPackageJson({ name: 'myapp', bin: 'server.js' }, 'com.example.app');
+  assert.equal(result.bin, 'server.js');
+});
+
 test('patchPackageJson: does not mutate the input', () => {
   const pkg = { taskPrimer: { browser: { product: 'chrome' } } };
   patchPackageJson(pkg, 'com.example.app');

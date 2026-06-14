@@ -79,9 +79,12 @@ function escXml(str) {
  * @returns {object}            New patched object
  */
 function patchPackageJson(pkgJson, bundleId) {
-  const tp = pkgJson.taskPrimer || {};
+  const tp      = pkgJson.taskPrimer || {};
+  const mainFile = pkgJson.main || 'main.js';
   return {
     ...pkgJson,
+    // pkg requires a `bin` field to locate the entry point
+    bin: pkgJson.bin || mainFile,
     taskPrimer: {
       ...tp,
       appBundleId: bundleId,
