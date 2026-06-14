@@ -38,7 +38,7 @@ flowchart TD
   ```
 - `pkg` installed:
   ```bash
-  npm install -g @vercel/pkg
+  npm install -g @yao-pkg/pkg
   ```
 - An Apple Developer account with a Developer ID certificate (for signing + notarization)
 
