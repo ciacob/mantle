@@ -35,11 +35,15 @@ function parseArgs(argv) {
   const positional = [];
 
   for (let i = 1; i < args.length; i++) {
-    if (args[i] === '--global')              { flags.global = true; }
-    else if (args[i] === '--path' && args[i+1]) { flags.path = args[++i]; }
-    else if (args[i] === '--on-error' && args[i+1]) { flags.onError = args[++i]; }
-    else if (!args[i].startsWith('--'))      { positional.push(args[i]); }
+    if (args[i] === '--global')                   { flags.global = true; }
+    else if (args[i] === '--path' && args[i+1])   { flags.path = args[++i]; }
+    else if (args[i] === '--on-error' && args[i+1]){ flags.onError = args[++i]; }
+    else if (args[i] === '--cwd' && args[i+1])    { flags.cwd = nodePath.resolve(args[++i]); }
+    else if (!args[i].startsWith('--'))            { positional.push(args[i]); }
   }
+
+  // --cwd changes working directory for the entire invocation
+  if (flags.cwd) process.chdir(flags.cwd);
 
   return { command, flags, positional };
 }
@@ -194,6 +198,7 @@ Usage:
 
 Flags:
   --global          Write to ~/.mantle.json instead of ./mantle.json
+  --cwd <dir>       Treat <dir> as the working directory (useful when mantle is not on PATH)
   --path <dir>      Base directory for "mantle new"
   --on-error        skip (default) or abort on first error
 `);
