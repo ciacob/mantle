@@ -140,35 +140,6 @@ test('run: loadDescriptor error produces failed result', async () => {
   assert.ok(results[0].error.message.includes('no build.js'));
 });
 
-// ── Missing env variables ─────────────────────────────────────────────────────
-
-test('run: fails descriptor when required env vars are missing', async () => {
-  const descs   = [makeDescriptor('x')];
-  const results = await run(descs, BASE_CONFIG, {
-    loadDescriptor: makeLoadDescriptor(async () => {}),
-    buildStockFn:   (_desc, _config) => ({
-      ...makeStock(),
-      env: { MISSING_VAR: '' },   // empty = missing
-    }),
-  });
-
-  assert.equal(results[0].status, 'failed');
-  assert.ok(results[0].error.message.includes('MISSING_VAR'));
-});
-
-test('run: does not fail when all env vars are set', async () => {
-  const descs   = [makeDescriptor('x')];
-  const results = await run(descs, BASE_CONFIG, {
-    loadDescriptor: makeLoadDescriptor(async () => {}),
-    buildStockFn:   (_desc, _config) => ({
-      ...makeStock(),
-      env: { ALL_SET: 'value' },
-    }),
-  });
-
-  assert.equal(results[0].status, 'ok');
-});
-
 // ── only option ───────────────────────────────────────────────────────────────
 
 test('run: only option runs just the named descriptor', async () => {

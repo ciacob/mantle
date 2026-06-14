@@ -19,7 +19,7 @@
  */
 
 const nodePath  = require('node:path');
-const { buildStock, findMissingEnv } = require('./stock');
+const { buildStock } = require('./stock');
 
 // ── Injectable defaults ───────────────────────────────────────────────────────
 
@@ -113,20 +113,6 @@ async function run(descriptors, config, options = {}) {
       stock = buildStockFn(descriptor, config);
       stock.log.rotate();
     } catch (err) {
-      results.push({ name: descriptor.name, status: 'failed', error: err });
-      report({ type: 'error', name: descriptor.name, error: err });
-      if (onError === 'abort') break;
-      else continue;
-    }
-
-    // Check for missing required env variables (those still empty after resolution)
-    const missing = findMissingEnv(stock.env);
-    if (missing.length > 0) {
-      const err = new Error(
-        `Descriptor "${descriptor.name}" has missing required environment variables: ` +
-        missing.join(', ') + '\n' +
-        `  Set them in ${descriptor.path}/.env or in the shell environment.`
-      );
       results.push({ name: descriptor.name, status: 'failed', error: err });
       report({ type: 'error', name: descriptor.name, error: err });
       if (onError === 'abort') break;
