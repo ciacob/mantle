@@ -98,9 +98,13 @@ function runShell(command, options = {}, execFn = execSync) {
     });
     return typeof result === 'string' ? result.trim() : '';
   } catch (err) {
-    const stderr = err.stderr ? String(err.stderr).trim() : '';
-    const msg    = stderr || err.message || `Command failed: ${command}`;
-    throw new Error(`shell: ${msg}\n  command: ${command}`);
+    // Collect all available output — pkg and similar tools often write
+    // their real error to stdout rather than stderr.
+    const parts = [];
+    if (err.stderr && String(err.stderr).trim()) parts.push(String(err.stderr).trim());
+    if (err.stdout && String(err.stdout).trim()) parts.push(String(err.stdout).trim());
+    if (!parts.length) parts.push(err.message || `Command failed: ${command}`);
+    throw new Error(`shell: ${parts.join('\n')}\n  command: ${command}`);
   }
 }
 

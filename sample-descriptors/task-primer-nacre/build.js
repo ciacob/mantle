@@ -300,6 +300,7 @@ module.exports = {
     await fs.rm(buildDir, { recursive: true, force: true });
     await fs.mkdir(buildDir, { recursive: true });
     shell(`cp -R "${sourceDir}/." "${buildDir}"`);
+    // Remove node_modules — we reinstall below so pkg gets a clean, minimal tree
     await fs.rm(path.join(buildDir, 'node_modules'), { recursive: true, force: true });
     log.info(`Build location : ${buildDir}`);
 
@@ -310,6 +311,10 @@ module.exports = {
     const pkgJsonBuild = path.join(buildDir, 'package.json');
     await applyPackageJsonPatch(fs, pkgJsonBuild, env.APP_BUNDLE_ID);
     log.info('package.json patched: browser.product=nacre, appBundleId set');
+
+    // Reinstall production dependencies so pkg can bundle them
+    log.info('Installing production dependencies for pkg…');
+    shell('npm install --omit=dev', { cwd: buildDir });
 
     // ── Step 4: Run pkg ─────────────────────────────────────────────────────
 
@@ -323,6 +328,7 @@ module.exports = {
     shell(
       `"${env.PKG_BIN}" "${pkgJsonBuild}" ` +
       `--target ${env.PKG_TARGET || 'node20-macos-arm64'} ` +
+      `--no-bytecode ` +
       `--output "${binaryPath}"`,
       { cwd: buildDir }
     );
