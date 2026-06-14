@@ -140,6 +140,34 @@ function readAsset(
     : fileIO.read(fullPath);
 }
 
+// ── Path resolution helpers ───────────────────────────────────────────────────
+
+/**
+ * Resolve an env variable's value to an absolute path, anchored to `baseDir`
+ * when the value is relative.
+ *
+ * Throws with a clear message when the variable is empty or undefined, so
+ * descriptors get immediate feedback rather than a cryptic ENOENT later.
+ *
+ * @param {object} env      - Flat key→value env map (from stock.env)
+ * @param {string} key      - Env variable name
+ * @param {string} baseDir  - Base directory for relative values
+ * @param {object} [path]   - Injectable path module
+ * @returns {string}          Absolute path
+ * @throws {Error}            When the variable is empty
+ */
+function resolvePathFromEnv(env, key, baseDir, path = nodePath) {
+  const value = env[key];
+  if (!value || String(value).trim() === '') {
+    throw new Error(
+      `stock.resolvePath / stock.resolveAssetPath: ` +
+      `env variable "${key}" is empty — set it in .env or the shell environment`
+    );
+  }
+  const str = String(value).trim();
+  return path.isAbsolute(str) ? str : path.resolve(baseDir, str);
+}
+
 // ── buildStock ────────────────────────────────────────────────────────────────
 
 /**
@@ -152,7 +180,9 @@ function readAsset(
  * @param {object} [options.logIO]     - Logger I/O override (see logger.js)
  * @param {Function} [options.execFn] - execSync override
  * @param {Function} [options.dotenvParse] - dotenv.parse override
- * @returns {object}  The stock bundle: { log, env, readAsset, shell, paths, fs, path }
+ * @param {Function} [options.getCwd]  - Injectable process.cwd() (default: real)
+ * @returns {object}  The stock bundle: { log, env, readAsset, shell, resolvePath,
+ *                    resolveAssetPath, paths, fs, path }
  */
 function buildStock(descriptor, config, options = {}) {
   const {
@@ -162,6 +192,7 @@ function buildStock(descriptor, config, options = {}) {
     logIO       = undefined,
     execFn      = execSync,
     dotenvParse = dotenv.parse,
+    getCwd      = () => process.cwd(),
   } = options;
 
   const descriptorRoot = descriptor.path;
@@ -216,6 +247,47 @@ function buildStock(descriptor, config, options = {}) {
       return runShell(command, opts, execFn);
     },
 
+    /**
+     * Resolve an env variable's value to an absolute path, anchored to the
+     * current working directory when the value is relative.
+     *
+     * Use this for paths that naturally live outside the descriptor —
+     * source projects, output directories, external tools.
+     *
+     * @example
+     *   const sourceDir = stock.resolvePath('SOURCE_DIR');
+     *   // env: SOURCE_DIR=./my-project  →  /cwd/my-project
+     *   // env: SOURCE_DIR=/abs/path     →  /abs/path
+     *
+     * @param {string} envKey  - Name of the env variable holding the path
+     * @returns {string}         Absolute path
+     * @throws {Error}           When the variable is empty or undefined
+     */
+    resolvePath(envKey) {
+      return resolvePathFromEnv(env, envKey, getCwd(), nodePath);
+    },
+
+    /**
+     * Resolve an env variable's value to an absolute path, anchored to this
+     * descriptor's assets/ folder when the value is relative.
+     *
+     * Use this for files that ship with the descriptor — icons, templates,
+     * config files. Users can drop files into assets/ and reference them by
+     * filename only.
+     *
+     * @example
+     *   const iconPath = stock.resolveAssetPath('APP_ICON');
+     *   // env: APP_ICON=MyApp.icns      →  /descriptor/assets/MyApp.icns
+     *   // env: APP_ICON=/abs/icon.icns  →  /abs/icon.icns
+     *
+     * @param {string} envKey  - Name of the env variable holding the path
+     * @returns {string}         Absolute path
+     * @throws {Error}           When the variable is empty or undefined
+     */
+    resolveAssetPath(envKey) {
+      return resolvePathFromEnv(env, envKey, assetsDir, nodePath);
+    },
+
     /** Absolute paths for root, assets, and logs directories */
     paths,
 
@@ -227,4 +299,4 @@ function buildStock(descriptor, config, options = {}) {
   };
 }
 
-module.exports = { buildStock, loadEnv, findMissingEnv, runShell, readAsset };
+module.exports = { buildStock, loadEnv, findMissingEnv, runShell, readAsset, resolvePathFromEnv };

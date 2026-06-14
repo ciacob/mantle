@@ -14,6 +14,7 @@
 - [Build Descriptors](#build-descriptors)
 - [The Engine](#the-engine)
 - [Stock Functionality](#stock-functionality)
+- [Path Resolution](#path-resolution)
 - [CLI Reference](#cli-reference)
 - [Programmatic Usage](#programmatic-usage)
 - [Registry](#registry)
@@ -34,22 +35,24 @@ MANTLE is intentionally generic. It does not care what your build descriptors do
 
 ```mermaid
 graph TD
-    CLI["CLI — mantle [command]"]
-    API["Programmatic API — require('mantle')"]
+    CLI["CLI — node cli.js [command]"]
+    API["Programmatic API — require('mantle/engine')"]
     Engine["MANTLE Engine"]
-    Registry["Registry — ~/.mantle.json"]
+    GlobalReg["~/.mantle.json — global registry"]
+    LocalReg["./mantle.json — local registry"]
     Stock["Stock Functionality — injected utilities"]
     Logger["Logger — console + disk"]
 
     CLI --> Engine
     API --> Engine
-    Engine --> Registry
+    Engine --> GlobalReg
+    Engine --> LocalReg
     Engine --> Stock
     Engine --> Logger
 
     subgraph Descriptor ["Build Descriptor (×N)"]
         ENV[".env — arguments"]
-        ASSETS["assets/ — local files, nested"]
+        ASSETS["assets/ — local files"]
         BUILD["build.js — main(stock)"]
         LOGS["logs/ — rotated"]
     end
@@ -60,38 +63,60 @@ graph TD
     Logger --> LOGS
 ```
 
-The engine reads the registry, resolves each enabled descriptor in order, loads its environment, and calls its `main` function — passing in the stock utility bundle. Descriptors run sequentially; on error, the engine either skips to the next or aborts all subsequent entries, depending on configuration.
+The engine reads and merges the global and local registries, resolves each enabled descriptor in order, loads its environment, and calls its `main` function — passing in the stock utility bundle. Descriptors run sequentially; on error, the engine either skips to the next or aborts, depending on configuration.
 
 ---
 
 ## Installation
 
+MANTLE is not yet published to npm. Clone the repository and invoke the CLI directly:
+
 ```bash
-npm install -g mantle
+git clone https://github.com/ciacob/mantle.git
+node /path/to/mantle/cli.js <command>
 ```
 
-Or as a project dependency:
+To avoid typing the full path each time, add a shell alias or symlink:
 
 ```bash
-npm install mantle
+# Alias (add to ~/.zshrc or ~/.bashrc)
+alias mantle="node /path/to/mantle/cli.js"
+
+# Or symlink
+ln -s /path/to/mantle/cli.js /usr/local/bin/mantle
+chmod +x /usr/local/bin/mantle
+```
+
+Use `--cwd` when invoking from a different directory than your project root:
+
+```bash
+node /path/to/mantle/cli.js run --cwd /path/to/my-project
 ```
 
 ---
 
 ## Quick Start
 
-**1. Scaffold a new build descriptor:**
+**1. Create a local registry in your project:**
 
 ```bash
-mantle new my-first-build --path ./descriptors
+node /path/to/mantle/cli.js init
+# Creates ./mantle.json
 ```
 
-**2. Edit the generated files** (see [Build Descriptors](#build-descriptors) below).
-
-**3. Run all enabled descriptors:**
+**2. Scaffold a new build descriptor:**
 
 ```bash
-mantle run
+node /path/to/mantle/cli.js new my-first-build --path ./descriptors
+```
+
+**3. Fill in `descriptors/my-first-build/.env` and write your logic in `build.js`.**
+
+**4. Enable and run:**
+
+```bash
+node /path/to/mantle/cli.js enable my-first-build
+node /path/to/mantle/cli.js run
 ```
 
 ---
@@ -103,43 +128,56 @@ A build descriptor is a folder with a defined structure:
 ```
 my-descriptor/
 ├── .env                  # Environment variables / arguments
-├── assets/               # Local assets (arbitrary nesting supported)
+├── assets/               # Files that ship with this descriptor (icons, templates, …)
 │   └── ...
-├── build.js              # Entry point — must export a `main` function
-└── logs/                 # Auto-created by the engine; do not commit
+├── build.js              # Entry point — must export an async `main` function
+└── logs/                 # Auto-created by the engine; add to .gitignore
 ```
 
 ### `.env`
 
-Standard dotenv-style key-value pairs. Loaded automatically by the engine before `main` is called, and available via `process.env` inside `build.js`.
+Standard dotenv-style key-value pairs. The engine loads the file before calling `main`,
+then merges it with the shell environment — **shell values take precedence over `.env`
+values**, so credentials can be set in the shell or CI without modifying the file.
 
 ```dotenv
+# Paths relative to cwd (resolved by stock.resolvePath)
+SOURCE_DIR=../my-app
 OUTPUT_DIR=./dist
-TARGET_ENV=production
-RETRY_COUNT=3
+
+# Files relative to assets/ (resolved by stock.resolveAssetPath)
+APP_ICON=MyApp.icns
+
+# Leave sensitive values blank — set them in the shell instead
+APPLE_PASSWORD=
 ```
 
 ### `assets/`
 
-An arbitrary folder of local files your build needs — templates, configs, data files, etc. Nesting is fully supported. Reference them relative to the descriptor root inside `build.js`.
+Files that ship with the descriptor — icons, templates, config snippets. Place them here
+and reference them by filename via `stock.resolveAssetPath`. Arbitrary nesting is supported.
 
 ### `build.js`
 
-The descriptor's entry point. Must export an async `main` function. The engine calls it with the [stock utility bundle](#stock-functionality) as its only argument.
+The descriptor's entry point. Must export an async `main(stock)` function.
 
 ```js
-// build.js
+'use strict';
+
 module.exports = {
   async main(stock) {
-    const { log, readAsset, shell, env } = stock;
+    const { log, env, readAsset, shell, fs, path } = stock;
 
-    log.info('Starting my build...');
+    log.info('Starting build…');
 
-    const template = await readAsset('assets/template.html');
-    await shell(`cp ${template} ${env.OUTPUT_DIR}`);
+    const sourceDir = stock.resolvePath('SOURCE_DIR');      // relative to cwd
+    const iconPath  = stock.resolveAssetPath('APP_ICON');   // relative to assets/
+    const template  = readAsset('Info.plist.template');     // reads from assets/
+
+    await shell(`cp "${iconPath}" "${sourceDir}/icon.icns"`);
 
     log.info('Done.');
-  }
+  },
 };
 ```
 
@@ -147,24 +185,24 @@ module.exports = {
 
 ## The Engine
 
-The engine is the core of MANTLE. It:
+The engine:
 
-1. Reads `~/.mantle.json` to obtain the ordered list of descriptors.
-2. Filters to enabled entries only.
+1. Loads and merges `~/.mantle.json` (global) and `./mantle.json` (local). Local config values override global ones; descriptors from both registries are concatenated (global first).
+2. Filters to enabled entries only (or the named entry if `--only` / `mantle run <name>`).
 3. For each descriptor, in order:
-   - Loads `.env` into `process.env`.
+   - Loads `.env`, merging with the shell environment (shell wins).
    - Constructs the stock utility bundle, scoped to the descriptor.
    - Calls `main(stock)` from `build.js`.
    - Writes structured logs to the descriptor's `logs/` folder.
-4. On error: skips the failed descriptor and continues, or aborts all subsequent descriptors — depending on the `onError` setting.
+4. On error: skips and continues, or aborts — depending on `onError`.
 
 ```mermaid
 flowchart LR
-    Start([Start]) --> ReadRegistry[Read Registry]
-    ReadRegistry --> FilterEnabled[Filter Enabled]
-    FilterEnabled --> NextDescriptor{Next\nDescriptor?}
+    Start([Start]) --> ReadRegistry[Merge registries]
+    ReadRegistry --> FilterEnabled[Filter enabled]
+    FilterEnabled --> NextDescriptor{Next\ndescriptor?}
     NextDescriptor -- Yes --> LoadEnv[Load .env]
-    LoadEnv --> BuildStock[Build Stock Bundle]
+    LoadEnv --> BuildStock[Build stock bundle]
     BuildStock --> RunMain["Call main(stock)"]
     RunMain -- Success --> NextDescriptor
     RunMain -- Error / skip --> NextDescriptor
@@ -176,133 +214,176 @@ flowchart LR
 
 ## Stock Functionality
 
-The stock bundle is injected into every `build.js` `main` call. It provides common utilities so descriptors stay focused on their own logic.
+The stock bundle is injected into every `main(stock)` call. It provides common utilities so descriptors stay focused on their own logic.
 
 | Utility | Description |
 |---|---|
-| `log` | Scoped logger (`.info`, `.warn`, `.error`, `.debug`). Writes to console and the descriptor's `logs/` folder. |
-| `env` | Parsed `.env` values for this descriptor, as a plain object. |
-| `readAsset(relativePath)` | Reads a file from the descriptor's `assets/` folder. Returns a string by default. |
-| `shell(command)` | Runs a shell command; returns stdout. Throws on non-zero exit. |
-| `paths` | Resolved absolute paths for the descriptor root, assets folder, and logs folder. |
+| `log` | Scoped logger: `.info(msg)`, `.warn(msg)`, `.error(msg)`, `.debug(msg)`. Writes to console and `logs/`. |
+| `env` | Parsed `.env` values merged with shell environment, as a plain object. |
+| `readAsset(relativePath, [opts])` | Read a file from `assets/`. Returns a string by default; pass `{ binary: true }` or `{ encoding: null }` for a `Buffer`. |
+| `shell(command, [opts])` | Run a shell command synchronously. Returns trimmed stdout. Throws on non-zero exit. Accepts `{ cwd, env }`. |
+| `resolvePath(envKey)` | Resolve an env variable to an absolute path, anchored to **cwd**. See [Path Resolution](#path-resolution). |
+| `resolveAssetPath(envKey)` | Resolve an env variable to an absolute path, anchored to **`assets/`**. See [Path Resolution](#path-resolution). |
+| `paths` | `{ root, assets, logs }` — absolute paths for the descriptor's key directories. |
+| `fs` | `node:fs/promises` — re-exported for convenience. |
+| `path` | `node:path` — re-exported for convenience. |
 
-All stock utilities are scoped to the descriptor currently running. Logs written via `stock.log` are automatically tagged and routed to the correct `logs/` folder.
+---
+
+## Path Resolution
+
+Resolving paths from env variables correctly is one of the most common sources of bugs in
+build scripts. MANTLE provides two stock methods that handle this uniformly so descriptors
+never need to call `path.resolve` or `process.cwd()` manually.
+
+### `stock.resolvePath(envKey)`
+
+For paths that live **outside** the descriptor — source projects, output directories,
+external tool locations. Relative values are resolved against the directory where
+`mantle run` is invoked (the working directory).
+
+```js
+const sourceDir = stock.resolvePath('SOURCE_DIR');
+// .env: SOURCE_DIR=../my-app  →  /project/my-app   (relative to cwd)
+// .env: SOURCE_DIR=/abs/path  →  /abs/path          (absolute, unchanged)
+```
+
+### `stock.resolveAssetPath(envKey)`
+
+For files that **ship with the descriptor** — icons, templates, configs. Relative values
+are resolved against the descriptor's `assets/` folder. Users can drop files into `assets/`
+and reference them by filename only.
+
+```js
+const iconPath = stock.resolveAssetPath('APP_ICON');
+// .env: APP_ICON=MyApp.icns        →  /descriptor/assets/MyApp.icns
+// .env: APP_ICON=/abs/icon.icns    →  /abs/icon.icns   (absolute, unchanged)
+```
+
+### Behaviour common to both
+
+- **Absolute paths pass through unchanged.** Both methods detect absolute paths and return them as-is, so users can always override with a full path when needed.
+- **Empty variables throw immediately.** If the env variable is empty or undefined, the method throws a clear error naming the variable — you get an actionable message rather than a cryptic `ENOENT` somewhere downstream.
+- **Shell env takes precedence over `.env` file.** Set sensitive or machine-specific values in the shell; leave them blank in `.env`.
+
+### Anti-pattern to avoid
+
+Do not resolve paths manually in your `build.js`:
+
+```js
+// ✗ Fragile — breaks when --cwd is used or the descriptor is moved
+const iconPath = path.resolve(env.APP_ICON);
+const iconPath = path.resolve(process.cwd(), env.APP_ICON);
+```
+
+```js
+// ✓ Correct — always resolves against the right base
+const iconPath = stock.resolveAssetPath('APP_ICON');
+const sourceDir = stock.resolvePath('SOURCE_DIR');
+```
 
 ---
 
 ## CLI Reference
 
 ```
-mantle <command> [options]
+node /path/to/mantle/cli.js <command> [options]
 ```
 
 | Command | Description |
 |---|---|
-| `mantle new <name>` | Scaffold a new build descriptor at the given location. |
-| `mantle list` | List all registered descriptors, their order, and enabled/disabled status. |
-| `mantle enable <name>` | Enable a descriptor by name. |
-| `mantle disable <name>` | Disable a descriptor by name (skipped at runtime; stays in registry). |
-| `mantle move <name> up` | Move a descriptor one position earlier in the run order. |
-| `mantle move <name> down` | Move a descriptor one position later in the run order. |
-| `mantle run` | Run all enabled descriptors in order. |
-| `mantle run <name>` | Run a single descriptor by name, regardless of enabled status. |
-| `mantle run --on-error skip` | Run all; log errors and continue with subsequent descriptors. |
-| `mantle run --on-error abort` | Run all; abort all subsequent descriptors on first error. |
+| `init [--global]` | Create an empty registry (`./mantle.json` or `~/.mantle.json`). |
+| `new <name> [--path <dir>] [--global]` | Scaffold a new descriptor and register it (disabled by default). |
+| `list` | Show all registered descriptors with order and enabled/disabled status. |
+| `enable <name> [--global]` | Enable a descriptor by name. |
+| `disable <name> [--global]` | Disable a descriptor (skipped at runtime; stays registered). |
+| `move <name> up\|down [--global]` | Reorder a descriptor in the run sequence. |
+| `run [<name>] [--on-error skip\|abort]` | Run all enabled descriptors, or one by name. |
 
-### `mantle new`
+### Global flags
 
-```bash
-mantle new <name> [--path <dir>]
-```
+| Flag | Description |
+|---|---|
+| `--cwd <dir>` | Treat `<dir>` as the working directory for registry lookup and path resolution. Useful when mantle is not on PATH and you invoke it from a different directory. |
+| `--global` | Write registry mutations to `~/.mantle.json` instead of `./mantle.json`. |
+| `--on-error skip\|abort` | Override the `onError` config for this run only. |
 
-Scaffolds a new descriptor folder containing a starter `.env`, an empty `assets/` subfolder, and a `build.js` template. Registers the descriptor in `~/.mantle.json` (disabled by default).
+### Registry lookup order
 
-### `mantle list`
+For every command, mantle looks for registries in this order:
 
-```
-$ mantle list
+1. `<cwd>/mantle.json` — local registry
+2. `~/.mantle.json` — global registry
 
-  #   Name                  Status
-  ─────────────────────────────────
-  1   compile-frontend      enabled
-  2   generate-docs         enabled
-  3   notify-slack          disabled
-  4   deploy-staging        enabled
-```
-
-### `mantle run <name>`
-
-```bash
-mantle run <name>
-```
-
-Runs a single named descriptor directly, bypassing the registry run order and ignoring its enabled/disabled status. Useful for testing a descriptor in isolation or re-running a failed step without triggering the full pipeline. Respects `--on-error` for consistency, though it has no effect when only one descriptor is targeted.
+Both are loaded and merged when present. If neither exists, mantle exits with a clear error. Run `mantle init` to create one.
 
 ---
 
 ## Programmatic Usage
 
-MANTLE exposes its engine as a Node.js module, so it can be embedded in larger toolchains.
-
 ```js
-const mantle = require('mantle');
+const mantle = require('./engine/index');
 
 // Run all enabled descriptors
 await mantle.run();
 
+// Run from a specific directory
+await mantle.run({ cwd: '/path/to/project' });
+
 // Run with explicit error behaviour
 await mantle.run({ onError: 'abort' });
 
-// Run a specific subset by name
-await mantle.run({ only: ['compile-frontend', 'generate-docs'] });
+// Run a single descriptor by name
+await mantle.run({ only: 'my-descriptor' });
 
-// Access the registry programmatically
-const registry = await mantle.registry.load();
-await mantle.registry.enable('deploy-staging');
-await mantle.registry.move('deploy-staging', 'up');
+// Inspect the merged registry without running
+const { registry } = mantle.load({ cwd: '/path/to/project' });
+
+// Mutate the local registry
+mantle.registry.add({ name: 'x', path: '/abs/path', enabled: false });
+mantle.registry.enable('x');
+mantle.registry.move('x', 'up');
+
+// Mutate the global registry
+mantle.registry.enable('x', { global: true });
 ```
 
 ---
 
 ## Registry
 
-MANTLE keeps its descriptor registry at:
+MANTLE uses two registry files, merged at runtime:
 
-```
-~/.mantle.json
-```
+| File | Purpose |
+|---|---|
+| `~/.mantle.json` | Global registry — defaults and descriptors relevant across projects |
+| `./mantle.json` | Local registry — project-specific descriptors and config overrides |
 
-This is a plain JSON file and can be edited directly. The schema is straightforward:
+Both are plain JSON files and can be edited directly (MANTLE validates them on load). Local config values override global ones. Descriptors from both files are concatenated — global descriptors run before local ones.
 
 ```json
 {
+  "config": {
+    "onError": "skip",
+    "logLevel": "info"
+  },
   "descriptors": [
     {
-      "name": "compile-frontend",
-      "path": "/home/user/builds/compile-frontend",
+      "name": "my-descriptor",
+      "path": "./descriptors/my-descriptor",
       "enabled": true
-    },
-    {
-      "name": "generate-docs",
-      "path": "/home/user/builds/generate-docs",
-      "enabled": true
-    },
-    {
-      "name": "notify-slack",
-      "path": "/home/user/builds/notify-slack",
-      "enabled": false
     }
   ]
 }
 ```
 
-Order in the array is run order. MANTLE respects direct edits to this file; no sync step is needed.
+Descriptor `path` values may be absolute or relative. Relative paths are resolved against the directory containing the registry file they appear in.
 
 ---
 
 ## Logging
 
-Each descriptor has its own `logs/` subfolder, written to automatically by the engine and by anything called through `stock.log`.
+Each descriptor has its own `logs/` subfolder. Log entries are written by the engine and by anything called through `stock.log`.
 
 ```
 my-descriptor/
@@ -312,21 +393,21 @@ my-descriptor/
     └── build-2024-11-03.log      ← current
 ```
 
-Log files rotate daily. Older files are retained according to the `logRetentionDays` setting (default: 14). Log entries are structured:
+Log files rotate daily. Older files are retained for `logRetentionDays` days (default: 14). Entries are structured:
 
 ```
-[2024-11-03 09:14:22] [INFO]  [compile-frontend] Starting my build...
-[2024-11-03 09:14:23] [INFO]  [compile-frontend] Done.
-[2024-11-03 09:15:01] [ERROR] [notify-slack] Connection refused — slack.example.com:443
+[2024-11-03 09:14:22] [INFO ] [my-descriptor] Starting build…
+[2024-11-03 09:14:23] [INFO ] [my-descriptor] Done.
+[2024-11-03 09:15:01] [ERROR] [other-desc]    Connection refused
 ```
 
-Console output mirrors disk output, with colour formatting when a TTY is detected.
+Console output mirrors disk output, with ANSI colour when a TTY is detected.
 
 ---
 
 ## Configuration
 
-Global MANTLE behaviour can be configured by adding a `config` key to `~/.mantle.json`:
+Add a `config` key to either registry file. Local values override global ones.
 
 ```json
 {
@@ -334,16 +415,15 @@ Global MANTLE behaviour can be configured by adding a `config` key to `~/.mantle
     "onError": "skip",
     "logRetentionDays": 14,
     "logLevel": "info"
-  },
-  "descriptors": [ ... ]
+  }
 }
 ```
 
-| Key | Default | Description |
-|---|---|---|
-| `onError` | `"skip"` | `"skip"` or `"abort"`. Default error handling for `mantle run`. Overridden by the `--on-error` CLI flag. |
-| `logRetentionDays` | `14` | Number of daily log files to keep per descriptor before rotation discards old ones. |
-| `logLevel` | `"info"` | Minimum log level to emit. One of `debug`, `info`, `warn`, `error`. |
+| Key | Default | Values | Description |
+|---|---|---|---|
+| `onError` | `"skip"` | `"skip"` / `"abort"` | What to do when a descriptor fails. Overridden by `--on-error`. |
+| `logRetentionDays` | `14` | positive integer | Daily log files older than this are deleted on the next run. |
+| `logLevel` | `"info"` | `"debug"` / `"info"` / `"warn"` / `"error"` | Minimum level to emit to console and disk. |
 
 ---
 

@@ -32,12 +32,33 @@ module.exports = {
 
     log.info('Starting build: ${name}');
 
+    // ── Path resolution ───────────────────────────────────────────────────
+    //
+    // Use stock.resolvePath(envKey) for paths outside the descriptor
+    // (source projects, output dirs, external tools). Relative values are
+    // anchored to the directory where \`mantle run\` is invoked (cwd).
+    //
+    //   const outputDir = stock.resolvePath('OUTPUT_DIR');
+    //   // .env: OUTPUT_DIR=./dist  →  /cwd/dist
+    //
+    // Use stock.resolveAssetPath(envKey) for files that ship with the
+    // descriptor (icons, templates, configs). Drop the file into assets/
+    // and reference it by filename only. Relative values are anchored to
+    // this descriptor's assets/ folder.
+    //
+    //   const iconPath = stock.resolveAssetPath('APP_ICON');
+    //   // .env: APP_ICON=MyApp.icns  →  /descriptor/assets/MyApp.icns
+    //
+    // Both methods throw immediately when the variable is empty, so you
+    // get a clear error rather than a cryptic ENOENT later.
+    // Absolute paths always pass through unchanged.
+
     // Your build logic here.
     // Examples:
-    //   const template = await readAsset('template.html');
+    //   const template = readAsset('template.html');
     //   const output   = template.replace('{{VERSION}}', env.VERSION);
-    //   await fs.writeFile(path.join(paths.root, 'dist', 'index.html'), output);
-    //   await shell('npm run compile', { cwd: env.PROJECT_DIR });
+    //   await fs.writeFile(path.join(stock.resolvePath('OUTPUT_DIR'), 'index.html'), output);
+    //   shell('npm run compile', { cwd: stock.resolvePath('SOURCE_DIR') });
 
     log.info('Done: ${name}');
   },

@@ -24,7 +24,6 @@ const {
   patchPackageJson,
   outerInfoPlist,
   buildNacreConfig,
-  resolveEnvPaths,
   resolveOptionalSteps,
   exists,
   applyPackageJsonPatch,
@@ -252,49 +251,6 @@ test('buildNacreConfig: is JSON-serialisable', () => {
     iconPath: '/icon.icns', nacreOutDir: '/out',
   });
   assert.doesNotThrow(() => JSON.stringify(cfg));
-});
-
-// ── resolveEnvPaths ───────────────────────────────────────────────────────────
-
-test('resolveEnvPaths: resolves relative paths against baseDir', () => {
-  const env    = { SRC: './project', OUT: './dist' };
-  const fakePath = {
-    isAbsolute: (p) => p.startsWith('/'),
-    resolve:    (base, p) => `${base}/${p.replace('./', '')}`,
-  };
-  const result = resolveEnvPaths(env, ['SRC', 'OUT'], '/base', fakePath);
-  assert.equal(result.SRC, '/base/project');
-  assert.equal(result.OUT, '/base/dist');
-});
-
-test('resolveEnvPaths: leaves absolute paths unchanged', () => {
-  const env    = { SRC: '/absolute/path' };
-  const fakePath = {
-    isAbsolute: (p) => p.startsWith('/'),
-    resolve:    () => { throw new Error('should not call resolve'); },
-  };
-  const result = resolveEnvPaths(env, ['SRC'], '/base', fakePath);
-  assert.equal(result.SRC, '/absolute/path');
-});
-
-test('resolveEnvPaths: omits keys with empty values', () => {
-  const env    = { SRC: '/abs', EMPTY: '' };
-  const fakePath = { isAbsolute: () => true, resolve: (_, p) => p };
-  const result = resolveEnvPaths(env, ['SRC', 'EMPTY'], '/base', fakePath);
-  assert.ok('SRC'   in result);
-  assert.ok(!('EMPTY' in result));
-});
-
-test('resolveEnvPaths: omits keys not present in env', () => {
-  const env    = { SRC: '/abs' };
-  const fakePath = { isAbsolute: () => true, resolve: (_, p) => p };
-  const result = resolveEnvPaths(env, ['SRC', 'MISSING'], '/base', fakePath);
-  assert.ok(!('MISSING' in result));
-});
-
-test('resolveEnvPaths: returns empty object for empty keys array', () => {
-  const result = resolveEnvPaths({ SRC: '/x' }, [], '/base', nodePath);
-  assert.deepEqual(result, {});
 });
 
 // ── resolveOptionalSteps ──────────────────────────────────────────────────────

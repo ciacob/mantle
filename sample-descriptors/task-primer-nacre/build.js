@@ -263,27 +263,13 @@ module.exports = {
       throw new Error(`Missing required variables: ${missing.join(', ')}`);
     }
 
-    // Resolve directory-type paths relative to CWD (where the user invokes mantle)
-    const dirPaths = resolveEnvPaths(
-      env,
-      ['SOURCE_DIR', 'NACRE_DIR', 'OUTPUT_DIR'],
-      process.cwd(),
-      path
-    );
-
-    // Resolve asset-type paths relative to the descriptor's assets/ folder,
-    // so users can drop files there and reference them by name only.
-    const assetPaths = resolveEnvPaths(
-      env,
-      ['APP_ICON'],
-      stock.paths.assets,
-      path
-    );
-
-    const sourceDir   = dirPaths.SOURCE_DIR;
-    const nacrDir     = dirPaths.NACRE_DIR;
-    const outputDir   = dirPaths.OUTPUT_DIR;
-    const iconPath    = assetPaths.APP_ICON;
+    // Resolve paths using the stock utilities:
+    //   resolvePath      — anchors relative values to process.cwd()
+    //   resolveAssetPath — anchors relative values to this descriptor's assets/
+    const sourceDir = stock.resolvePath('SOURCE_DIR');
+    const nacrDir   = stock.resolvePath('NACRE_DIR');
+    const outputDir = stock.resolvePath('OUTPUT_DIR');
+    const iconPath  = stock.resolveAssetPath('APP_ICON');
     const pkgJsonPath = path.join(sourceDir, 'package.json');
     const nacreScript = path.join(nacrDir, 'scripts', 'build.js');
 
@@ -449,7 +435,6 @@ module.exports = {
   patchPackageJson,
   outerInfoPlist,
   buildNacreConfig,
-  resolveEnvPaths,
   resolveOptionalSteps,
   exists,
   applyPackageJsonPatch,

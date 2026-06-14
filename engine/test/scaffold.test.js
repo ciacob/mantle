@@ -17,13 +17,18 @@ test('buildJsTemplate: exports a main function', () => {
   assert.ok(src.includes('module.exports'));
 });
 
-test('buildJsTemplate: destructures expected stock properties', () => {
+test('buildJsTemplate: documents resolvePath and resolveAssetPath', () => {
+  const src = buildJsTemplate('x');
+  assert.ok(src.includes('stock.resolvePath'));
+  assert.ok(src.includes('stock.resolveAssetPath'));
+});
+
+test('buildJsTemplate: mentions stock bundle properties', () => {
   const src = buildJsTemplate('x');
   assert.ok(src.includes('log'));
   assert.ok(src.includes('env'));
   assert.ok(src.includes('readAsset'));
   assert.ok(src.includes('shell'));
-  assert.ok(src.includes('paths'));
   assert.ok(src.includes('fs'));
   assert.ok(src.includes('path'));
 });
