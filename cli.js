@@ -42,9 +42,7 @@ function parseArgs(argv) {
     else if (!args[i].startsWith('--'))            { positional.push(args[i]); }
   }
 
-  // --cwd changes working directory for the entire invocation
-  if (flags.cwd) process.chdir(flags.cwd);
-
+  // --cwd is passed explicitly to commands rather than mutating process.cwd()
   return { command, flags, positional };
 }
 
@@ -54,9 +52,8 @@ async function cmdNew(positional, flags) {
   const name = positional[0];
   if (!name) { log.error('Usage: mantle new <name> [--path <dir>] [--global]'); process.exit(1); }
 
-  const baseDir  = flags.path
-    ? nodePath.resolve(flags.path)
-    : process.cwd();
+  const cwd      = flags.cwd || process.cwd();
+  const baseDir  = flags.path ? nodePath.resolve(flags.path) : cwd;
   const destPath = nodePath.join(baseDir, name);
 
   // Scaffold the folder
@@ -66,7 +63,7 @@ async function cmdNew(positional, flags) {
   // Register it (disabled by default)
   const targetPath = flags.global
     ? globalRegistryPath(nodeOs.homedir())
-    : localRegistryPath(process.cwd());
+    : localRegistryPath(cwd);
 
   try {
     const data = readRaw(targetPath, realFileIO);
@@ -83,10 +80,10 @@ async function cmdNew(positional, flags) {
   }
 }
 
-function cmdList() {
+function cmdList(flags) {
   let result;
   try {
-    result = load({ cwd: process.cwd() });
+    result = load({ cwd: flags.cwd || process.cwd() });
   } catch (err) {
     log.error(err.message);
     process.exit(1);
@@ -121,7 +118,7 @@ function cmdEnable(positional, flags) {
   const name = positional[0];
   if (!name) { log.error('Usage: mantle enable <name> [--global]'); process.exit(1); }
   try {
-    registry.enable(name, { global: flags.global });
+    registry.enable(name, { global: flags.global, cwd: flags.cwd });
     log.info(`Enabled "${name}"`);
   } catch (err) {
     log.error(err.message);
@@ -133,7 +130,7 @@ function cmdDisable(positional, flags) {
   const name = positional[0];
   if (!name) { log.error('Usage: mantle disable <name> [--global]'); process.exit(1); }
   try {
-    registry.disable(name, { global: flags.global });
+    registry.disable(name, { global: flags.global, cwd: flags.cwd });
     log.info(`Disabled "${name}"`);
   } catch (err) {
     log.error(err.message);
@@ -149,7 +146,7 @@ function cmdMove(positional, flags) {
     process.exit(1);
   }
   try {
-    registry.move(name, direction, { global: flags.global });
+    registry.move(name, direction, { global: flags.global, cwd: flags.cwd });
     log.info(`Moved "${name}" ${direction}`);
   } catch (err) {
     log.error(err.message);
@@ -160,8 +157,9 @@ function cmdMove(positional, flags) {
 async function cmdRun(positional, flags) {
   const only    = positional[0] || null;
   const onError = flags.onError || null;
+  const cwd     = flags.cwd || process.cwd();
   try {
-    const results = await run({ cwd: process.cwd(), only, onError });
+    const results = await run({ cwd, only, onError });
     const failed  = results.filter((r) => r.status === 'failed');
     if (failed.length > 0) process.exit(1);
   } catch (err) {
@@ -173,7 +171,7 @@ async function cmdRun(positional, flags) {
 function cmdInitRegistry(flags) {
   const targetPath = flags.global
     ? globalRegistryPath(nodeOs.homedir())
-    : localRegistryPath(process.cwd());
+    : localRegistryPath(flags.cwd || process.cwd());
 
   if (realFileIO.exists(targetPath)) {
     log.info(`Registry already exists: ${targetPath}`);
@@ -211,7 +209,7 @@ async function main() {
 
   switch (command) {
     case 'new':     await cmdNew(positional, flags);   break;
-    case 'list':         cmdList();                    break;
+    case 'list':         cmdList(flags);                    break;
     case 'enable':       cmdEnable(positional, flags); break;
     case 'disable':      cmdDisable(positional, flags);break;
     case 'move':         cmdMove(positional, flags);   break;

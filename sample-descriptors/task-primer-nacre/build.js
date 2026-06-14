@@ -263,17 +263,27 @@ module.exports = {
       throw new Error(`Missing required variables: ${missing.join(', ')}`);
     }
 
-    const paths = resolveEnvPaths(
+    // Resolve directory-type paths relative to CWD (where the user invokes mantle)
+    const dirPaths = resolveEnvPaths(
       env,
-      ['SOURCE_DIR', 'NACRE_DIR', 'OUTPUT_DIR', 'APP_ICON'],
+      ['SOURCE_DIR', 'NACRE_DIR', 'OUTPUT_DIR'],
       process.cwd(),
       path
     );
 
-    const sourceDir   = paths.SOURCE_DIR;
-    const nacrDir     = paths.NACRE_DIR;
-    const outputDir   = paths.OUTPUT_DIR;
-    const iconPath    = paths.APP_ICON;
+    // Resolve asset-type paths relative to the descriptor's assets/ folder,
+    // so users can drop files there and reference them by name only.
+    const assetPaths = resolveEnvPaths(
+      env,
+      ['APP_ICON'],
+      stock.paths.assets,
+      path
+    );
+
+    const sourceDir   = dirPaths.SOURCE_DIR;
+    const nacrDir     = dirPaths.NACRE_DIR;
+    const outputDir   = dirPaths.OUTPUT_DIR;
+    const iconPath    = assetPaths.APP_ICON;
     const pkgJsonPath = path.join(sourceDir, 'package.json');
     const nacreScript = path.join(nacrDir, 'scripts', 'build.js');
 

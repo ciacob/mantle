@@ -67,7 +67,7 @@ cp .env.template .env
 | `APP_NAME` | ✓ | Human-readable app name (e.g. `My App`) |
 | `APP_BUNDLE_ID` | ✓ | Reverse-DNS bundle ID (e.g. `com.example.myapp`) |
 | `APP_VERSION` | ✓ | Version string (e.g. `1.0.0`) |
-| `APP_ICON` | ✓ | Absolute path to an `.icns` icon file |
+| `APP_ICON` | ✓ | Path to an `.icns` icon file. Relative paths resolve against `assets/` |
 | `OUTPUT_DIR` | ✓ | Where the finished `.app` is written (e.g. `./dist`) |
 | `NACRE_DIR` | ✓ | Absolute path to the nacre repository root |
 | `PKG_BIN` | ✓ | Path to pkg binary (default: `pkg`) |
