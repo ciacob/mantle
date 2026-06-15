@@ -10,13 +10,13 @@ as the UI layer.
 
 ```mermaid
 flowchart TD
-    A["task-primer project\n(npm version)"] --> B["1 · Validate environment"]
-    B --> C["2 · rsync copy\n(excl. .git, .browsers, node_modules)"]
-    C --> D["3 · Patch package.json\nbrowser.product=nacre, appName, appBundleId, pkg.assets"]
-    D --> E["4 · npm install --omit=dev\nthen pkg → Mach-O binary"]
-    E --> F["5 · Assemble outer .app\nlauncher script + Mach-O + Info.plist + icon"]
-    F --> G["6 · nacre scripts/build.js\nnacre .app bundle"]
-    G --> H["7 · Place nacre bundle\nouter .app/Contents/Resources/"]
+    A["task-primer project (npm version)"] --> B["1 · Validate environment"]
+    B --> C["2 · rsync copy (excl. .git, .browsers, node_modules)"]
+    C --> D["3 · Patch package.json browser.product=nacre, appName, appBundleId, pkg.assets"]
+    D --> E["4 · npm install --omit=dev then pkg → Mach-O binary"]
+    E --> F["5 · Assemble outer .app launcher script + Mach-O + Info.plist + icon"]
+    F --> G["6 · nacre scripts/build.js nacre .app bundle"]
+    G --> H["7 · Place nacre bundle outer .app/Contents/Resources/"]
     H --> I["8 · codesign (optional)"]
     I --> J["9 · notarytool + stapler (optional)"]
     J --> K["Distributable .app"]
