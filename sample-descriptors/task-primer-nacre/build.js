@@ -334,18 +334,30 @@ module.exports = {
     log.info('Installing production dependencies for pkg…');
     shell('npm install --omit=dev', { cwd: buildDir, stream: true });
 
-    // Patch yargs' package.json to remove the ESM conditional export.
-    // pkg resolves the `exports` field and picks `index.mjs` (ESM) over
-    // the CJS entrypoint, which then fails inside pkg's snapshot filesystem.
-    // Removing the `exports` field forces Node's legacy resolution to use
-    // the `main` field (index.cjs) instead.
+    // Patch yargs' package.json to replace conditional exports with explicit
+    // CJS paths. pkg resolves the `exports` field and picks the `import`
+    // (ESM) path over `require` (CJS), which then fails inside pkg's snapshot
+    // filesystem. We rewrite every export entry to point directly to the CJS
+    // file, preserving subpath exports like `yargs/yargs` and `yargs/helpers`.
     const yargsPkgPath = path.join(buildDir, 'node_modules', 'yargs', 'package.json');
     if (await exists(fs, yargsPkgPath)) {
       const yargsPkg = JSON.parse(await fs.readFile(yargsPkgPath, 'utf8'));
       if (yargsPkg.exports) {
-        delete yargsPkg.exports;
+        // Walk the exports map and replace each entry with its `require` (CJS) value.
+        // Entries that are plain strings (already CJS paths) are left unchanged.
+        function cjsOnly(entry) {
+          if (typeof entry === 'string') return entry;
+          if (entry && entry.require) return cjsOnly(entry.require);
+          if (entry && entry.default) return cjsOnly(entry.default);
+          return entry;
+        }
+        const patched = {};
+        for (const [key, val] of Object.entries(yargsPkg.exports)) {
+          patched[key] = cjsOnly(val);
+        }
+        yargsPkg.exports = patched;
         await fs.writeFile(yargsPkgPath, JSON.stringify(yargsPkg, null, 2), 'utf8');
-        log.info('Patched yargs/package.json: removed exports field for pkg compatibility');
+        log.info('Patched yargs/package.json: rewrote exports to CJS-only for pkg compatibility');
       }
     }
 
