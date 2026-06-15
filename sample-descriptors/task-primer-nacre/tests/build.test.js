@@ -133,25 +133,35 @@ test('escXml: coerces non-string input', () => {
 // ── patchPackageJson ──────────────────────────────────────────────────────────
 
 test('patchPackageJson: sets browser.product to nacre', () => {
-  const result = patchPackageJson({ name: 'myapp' }, 'com.example.app');
+  const result = patchPackageJson({ name: 'myapp' }, 'com.example.app', 'My App');
   assert.equal(result.taskPrimer.browser.product, 'nacre');
 });
 
 test('patchPackageJson: sets appBundleId', () => {
-  const result = patchPackageJson({ name: 'myapp' }, 'com.example.app');
+  const result = patchPackageJson({ name: 'myapp' }, 'com.example.app', 'My App');
   assert.equal(result.taskPrimer.appBundleId, 'com.example.app');
 });
 
+test('patchPackageJson: sets appName from parameter', () => {
+  const result = patchPackageJson({ name: 'myapp' }, 'com.example.app', 'My App');
+  assert.equal(result.taskPrimer.appName, 'My App');
+});
+
+test('patchPackageJson: falls back to existing appName when not provided', () => {
+  const pkg    = { taskPrimer: { appName: 'Original Name' } };
+  const result = patchPackageJson(pkg, 'com.example.app', null);
+  assert.equal(result.taskPrimer.appName, 'Original Name');
+});
+
 test('patchPackageJson: preserves existing taskPrimer fields', () => {
-  const pkg = { taskPrimer: { appName: 'My App', webPort: 3000 } };
-  const result = patchPackageJson(pkg, 'com.example.app');
-  assert.equal(result.taskPrimer.appName,  'My App');
-  assert.equal(result.taskPrimer.webPort,  3000);
+  const pkg = { taskPrimer: { appName: 'Old', webPort: 3000 } };
+  const result = patchPackageJson(pkg, 'com.example.app', 'New Name');
+  assert.equal(result.taskPrimer.webPort, 3000);
 });
 
 test('patchPackageJson: preserves existing browser fields', () => {
   const pkg = { taskPrimer: { browser: { buildId: 'stable', debugPort: 9222 } } };
-  const result = patchPackageJson(pkg, 'com.example.app');
+  const result = patchPackageJson(pkg, 'com.example.app', 'My App');
   assert.equal(result.taskPrimer.browser.buildId,   'stable');
   assert.equal(result.taskPrimer.browser.debugPort,  9222);
   assert.equal(result.taskPrimer.browser.product,   'nacre');
@@ -159,14 +169,14 @@ test('patchPackageJson: preserves existing browser fields', () => {
 
 test('patchPackageJson: preserves top-level package.json fields', () => {
   const pkg = { name: 'myapp', version: '1.0.0', scripts: { test: 'jest' } };
-  const result = patchPackageJson(pkg, 'com.example.app');
+  const result = patchPackageJson(pkg, 'com.example.app', 'My App');
   assert.equal(result.name,    'myapp');
   assert.equal(result.version, '1.0.0');
   assert.deepEqual(result.scripts, { test: 'jest' });
 });
 
 test('patchPackageJson: adds pkg.assets with ui and tasks', () => {
-  const result = patchPackageJson({ name: 'myapp' }, 'com.example.app');
+  const result = patchPackageJson({ name: 'myapp' }, 'com.example.app', 'My App');
   assert.ok(Array.isArray(result.pkg.assets));
   assert.ok(result.pkg.assets.includes('ui/**'));
   assert.ok(result.pkg.assets.includes('tasks/**'));
@@ -174,29 +184,29 @@ test('patchPackageJson: adds pkg.assets with ui and tasks', () => {
 
 test('patchPackageJson: merges with existing pkg.assets', () => {
   const pkg = { pkg: { assets: ['custom/**'] } };
-  const result = patchPackageJson(pkg, 'com.example.app');
+  const result = patchPackageJson(pkg, 'com.example.app', 'My App');
   assert.ok(result.pkg.assets.includes('custom/**'));
   assert.ok(result.pkg.assets.includes('ui/**'));
 });
 
 test('patchPackageJson: adds bin field from main when bin is absent', () => {
-  const result = patchPackageJson({ name: 'myapp', main: 'main.js' }, 'com.example.app');
+  const result = patchPackageJson({ name: 'myapp', main: 'main.js' }, 'com.example.app', 'My App');
   assert.equal(result.bin, 'main.js');
 });
 
 test('patchPackageJson: falls back to main.js when neither bin nor main present', () => {
-  const result = patchPackageJson({ name: 'myapp' }, 'com.example.app');
+  const result = patchPackageJson({ name: 'myapp' }, 'com.example.app', 'My App');
   assert.equal(result.bin, 'main.js');
 });
 
 test('patchPackageJson: preserves existing bin field', () => {
-  const result = patchPackageJson({ name: 'myapp', bin: 'server.js' }, 'com.example.app');
+  const result = patchPackageJson({ name: 'myapp', bin: 'server.js' }, 'com.example.app', 'My App');
   assert.equal(result.bin, 'server.js');
 });
 
 test('patchPackageJson: does not mutate the input', () => {
   const pkg = { taskPrimer: { browser: { product: 'chrome' } } };
-  patchPackageJson(pkg, 'com.example.app');
+  patchPackageJson(pkg, 'com.example.app', 'My App');
   assert.equal(pkg.taskPrimer.browser.product, 'chrome');
 });
 

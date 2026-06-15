@@ -70,15 +70,19 @@ function escXml(str) {
  * Does not mutate the input.
  *
  * Changes:
- *   taskPrimer.appBundleId = bundleId
+ *   bin                        = main (required by pkg)
+ *   pkg.assets                 = includes all dynamically-loaded paths
+ *   taskPrimer.appName         = appName (must match nacre bundle name)
+ *   taskPrimer.appBundleId     = bundleId
  *   taskPrimer.browser.product = "nacre"
- *   All other browser.* keys are preserved.
+ *   All other fields preserved.
  *
  * @param {object} pkgJson    - Parsed package.json object
  * @param {string} bundleId   - CFBundleIdentifier value
+ * @param {string} appName    - Application name (must match nacre bundle directory name)
  * @returns {object}            New patched object
  */
-function patchPackageJson(pkgJson, bundleId) {
+function patchPackageJson(pkgJson, bundleId, appName) {
   const tp      = pkgJson.taskPrimer || {};
   const mainFile = pkgJson.main || 'main.js';
   return {
@@ -101,6 +105,10 @@ function patchPackageJson(pkgJson, bundleId) {
     },
     taskPrimer: {
       ...tp,
+      // appName drives the nacre binary path in launcher.js:
+      //   ../Resources/<appName>.app/Contents/MacOS/nacre
+      // Must match the name used when building the nacre bundle.
+      appName:     appName || tp.appName,
       appBundleId: bundleId,
       browser: {
         ...(tp.browser || {}),
@@ -241,10 +249,10 @@ async function exists(fs, p) {
  * @param {string} bundleId    - Bundle ID to inject
  * @returns {Promise<object>}    The patched package.json object
  */
-async function applyPackageJsonPatch(fs, filePath, bundleId) {
+async function applyPackageJsonPatch(fs, filePath, bundleId, appName) {
   const raw     = await fs.readFile(filePath, 'utf8');
   const pkgJson = JSON.parse(raw);
-  const patched = patchPackageJson(pkgJson, bundleId);
+  const patched = patchPackageJson(pkgJson, bundleId, appName);
   await fs.writeFile(filePath, JSON.stringify(patched, null, 2) + '\n', 'utf8');
   return patched;
 }
@@ -330,7 +338,7 @@ module.exports = {
     log.info('Step 3/9 — Patching package.json for nacre mode');
 
     const pkgJsonBuild = path.join(buildDir, 'package.json');
-    await applyPackageJsonPatch(fs, pkgJsonBuild, env.APP_BUNDLE_ID);
+    await applyPackageJsonPatch(fs, pkgJsonBuild, env.APP_BUNDLE_ID, env.APP_NAME);
     log.info('package.json patched: browser.product=nacre, appBundleId set');
 
     // Reinstall production dependencies so pkg can bundle them
