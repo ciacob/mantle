@@ -10,20 +10,35 @@ as the UI layer.
 
 ```mermaid
 flowchart TD
-    A["task-primer project
-    (npm version)"] --> B["1 · Copy + patch
-    browser.product=nacre"]
-    B --> C["2 · pkg
-    Mach-O binary"]
-    C --> D["3 · Assemble outer .app
-    around the Mach-O"]
-    D --> E["4 · nacre scripts/build.js
-    nacre .app bundle"]
-    E --> F["5 · Copy nacre bundle
-    into outer .app/Contents/Resources/"]
-    F --> G["6 · codesign"]
-    G --> H["7 · notarytool + stapler"]
-    H --> I["Distributable .app"]
+    A["task-primer project\n(npm version)"] --> B["1 · Validate environment"]
+    B --> C["2 · rsync copy\n(excl. .git, .browsers, node_modules)"]
+    C --> D["3 · Patch package.json\nbrowser.product=nacre, appName, appBundleId, pkg.assets"]
+    D --> E["4 · npm install --omit=dev\nthen pkg → Mach-O binary"]
+    E --> F["5 · Assemble outer .app\nlauncher script + Mach-O + Info.plist + icon"]
+    F --> G["6 · nacre scripts/build.js\nnacre .app bundle"]
+    G --> H["7 · Place nacre bundle\nouter .app/Contents/Resources/"]
+    H --> I["8 · codesign (optional)"]
+    I --> J["9 · notarytool + stapler (optional)"]
+    J --> K["Distributable .app"]
+```
+
+The outer `.app` contains a thin **launcher shell script** as its executable. The script
+always passes `--ui --autoexit` to the Mach-O so clicking the Dock icon starts
+task-primer in UI mode and exits cleanly when the window is closed.
+
+```
+MyApp.app/
+└── Contents/
+    ├── Info.plist
+    ├── MacOS/
+    │   ├── My-App            ← launcher shell script (CFBundleExecutable)
+    │   └── My-App-bin        ← the real Mach-O
+    └── Resources/
+        ├── AppIcon.icns
+        └── My App.app/       ← nacre bundle (WKWebView UI layer)
+            └── Contents/
+                ├── MacOS/nacre
+                └── ...
 ```
 
 ---
@@ -36,11 +51,15 @@ flowchart TD
   ```bash
   cd /path/to/nacre/shim && swift build -c release
   ```
-- `pkg` installed:
+- `@yao-pkg/pkg` installed globally:
   ```bash
   npm install -g @yao-pkg/pkg
   ```
-- An Apple Developer account with a Developer ID certificate (for signing + notarization)
+- task-primer project with `yargs` pinned to exactly `"17.7.2"` — see
+  [pkg compatibility notes](#pkg-compatibility-notes) below.
+- An Apple Developer account with a Developer ID certificate (for signing + notarization).
+  Signing and notarization are optional — the build completes without them, producing an
+  unsigned bundle suitable for local testing.
 
 ---
 
@@ -63,28 +82,28 @@ cp .env.template .env
 
 | Variable | Required | Description |
 |---|---|---|
-| `SOURCE_DIR` | ✓ | Absolute path to the task-primer project root |
-| `APP_NAME` | ✓ | Human-readable app name (e.g. `My App`) |
-| `APP_BUNDLE_ID` | ✓ | Reverse-DNS bundle ID (e.g. `com.example.myapp`) |
-| `APP_VERSION` | ✓ | Version string (e.g. `1.0.0`) |
-| `APP_ICON` | ✓ | Path to an `.icns` icon file. Relative paths resolve against `assets/` |
-| `OUTPUT_DIR` | ✓ | Where the finished `.app` is written (e.g. `./dist`) |
-| `NACRE_DIR` | ✓ | Absolute path to the nacre repository root |
-| `PKG_BIN` | ✓ | Path to pkg binary (default: `pkg`) |
-| `PKG_TARGET` | | pkg target string (default: `node20-macos-arm64`) |
-| `APPLE_IDENTITY` | | Developer ID for codesign (skip to produce unsigned build) |
-| `APPLE_ID` | | Apple ID for notarytool (skip to skip notarization) |
-| `APPLE_PASSWORD` | | App-specific password — **set in shell, not in .env** |
-| `APPLE_TEAM_ID` | | Team ID for notarytool |
+| `SOURCE_DIR` | ✓ | Path to the task-primer project root. Relative values resolve against cwd. |
+| `APP_NAME` | ✓ | Human-readable app name (e.g. `My App`). Used for the `.app` bundle name, menu bar, and Dock label. Must match `taskPrimer.appName` in the source project's `package.json`. |
+| `APP_BUNDLE_ID` | ✓ | Reverse-DNS bundle identifier (e.g. `com.example.myapp`). |
+| `APP_VERSION` | ✓ | Version string (e.g. `1.0.0`). |
+| `APP_ICON` | ✓ | Path to an `.icns` icon file. Relative values resolve against this descriptor's `assets/` folder — drop the file there and just write the filename. |
+| `OUTPUT_DIR` | ✓ | Where the finished `.app` is written. Relative values resolve against cwd. |
+| `NACRE_DIR` | ✓ | Path to the nacre repository root. Relative values resolve against cwd. |
+| `PKG_BIN` | ✓ | Path to the pkg binary (default: `pkg` if globally installed). |
+| `PKG_TARGET` | | pkg target string. Default: `node20-macos-arm64`. The first run builds the Node base binary from source (~10 min); subsequent runs use the pkg cache and are fast. |
+| `APPLE_IDENTITY` | | Developer ID Application identity for codesign (e.g. `Developer ID Application: Your Name (TEAMID)`). Leave blank to skip signing. |
+| `APPLE_ID` | | Apple ID email for notarytool. Leave blank to skip notarization. |
+| `APPLE_PASSWORD` | | App-specific password for notarytool. **Set in the shell, never in `.env`.** |
+| `APPLE_TEAM_ID` | | Apple Developer Team ID for notarytool. |
 
 **4. Add the descriptor to your MANTLE registry:**
 
 ```bash
-# From your project root (where mantle.json lives, or will be created):
-mantle init                  # creates mantle.json if needed
+# From your project root:
+node /path/to/mantle/cli.js init          # creates ./mantle.json if needed
 ```
 
-Then add the descriptor entry manually to `mantle.json`:
+Then add the entry to `mantle.json`:
 
 ```json
 {
@@ -98,41 +117,94 @@ Then add the descriptor entry manually to `mantle.json`:
 }
 ```
 
-Or use the CLI:
-
-```bash
-mantle new task-primer-nacre --path ./my-descriptors
-# (then replace the scaffolded build.js with this one)
-mantle enable task-primer-nacre
-```
-
 ---
 
 ## Running
 
 ```bash
 # Run the full pipeline
-mantle run
+node /path/to/mantle/cli.js run
 
-# Or run this descriptor alone
-mantle run task-primer-nacre
+# Run this descriptor alone (useful during development)
+node /path/to/mantle/cli.js run task-primer-nacre
+
+# From a different directory
+node /path/to/mantle/cli.js run --cwd /path/to/project
 ```
 
-Output is written to `OUTPUT_DIR/<AppName>.app`.
+Output is written to `OUTPUT_DIR/<APP_NAME>.app`.
 
 ---
 
 ## Sensitive credentials
 
-`APPLE_PASSWORD` should never be stored in `.env`. Set it in your shell:
+`APPLE_PASSWORD` should never be stored in `.env`. Set it in your shell before running:
 
 ```bash
 export APPLE_PASSWORD="xxxx-xxxx-xxxx-xxxx"
-mantle run
+node /path/to/mantle/cli.js run
 ```
 
-Or in CI, inject it as a secret environment variable. dotenv's precedence rule
-ensures shell values always win over `.env` file values.
+Or inject it as a CI secret. dotenv's precedence rule ensures shell values always win over
+`.env` file values, so the blank entry in `.env` is safe to commit.
+
+---
+
+## pkg compatibility notes
+
+`@yao-pkg/pkg` (the actively maintained fork of the original `pkg`) snapshots your app
+and its dependencies into the Mach-O binary. Several compatibility requirements apply:
+
+**1. Pin `yargs` to exactly `17.7.2`.**
+
+yargs 18+ ships as pure ESM with no CJS fallback. pkg's snapshot filesystem cannot
+execute ESM modules, so it fails at startup. yargs 17 is the last version with full
+CJS support and an identical API for the patterns task-primer uses.
+
+In your task-primer project's `package.json`:
+```json
+"yargs": "17.7.2"
+```
+No caret — exact pin ensures reproducible builds regardless of when `npm install` runs.
+
+**2. Declare all dynamically-loaded paths as `pkg.assets`.**
+
+pkg's static analyser cannot trace `child_process.fork(variable)` or
+`require(variable)` calls. The descriptor automatically adds the following to
+`pkg.assets` when patching `package.json`:
+
+- `server/**` — the Fastify server process (forked by main)
+- `worker/**` — the task worker process (forked by main)
+- `shared/**` — IPC message definitions (required by both)
+- `ui/**` — static web frontend (served by Fastify)
+- `tasks/**` — user task modules (loaded dynamically)
+
+If your project adds other dynamically-loaded files, declare them in the source
+project's `package.json` under `pkg.assets` before running the build — the descriptor
+merges rather than replaces any existing `pkg.assets` entries.
+
+**3. First run is slow.**
+
+pkg downloads and compiles the Node.js base binary from source on first run (~10 min
+on Apple Silicon). The result is cached in `~/.pkg-cache`. Subsequent runs are fast.
+
+---
+
+## Bundle identity
+
+`APP_NAME` must match exactly across three places:
+
+1. `taskPrimer.appName` in the source project's `package.json` — task-primer uses this
+   to locate the nacre binary at runtime:
+   `../Resources/<appName>.app/Contents/MacOS/nacre`
+
+2. The `APP_NAME` variable in this descriptor's `.env` — used to name the nacre bundle
+   and the outer `.app`.
+
+3. The nacre `Info.plist` `CFBundleName` — set automatically by the build.
+
+The descriptor patches `taskPrimer.appName` in the copied `package.json` automatically,
+so as long as `.env` is correct the three stay in sync.
 
 ---
 
@@ -141,3 +213,12 @@ ensures shell values always win over `.env` file values.
 ```bash
 echo "my-descriptors/task-primer-nacre/.env" >> .gitignore
 ```
+
+The `.env.template` file is safe to commit — it documents the required variables
+without containing any values.
+
+---
+
+## License
+
+Apache 2.0 — see the [mantle repository](https://github.com/ciacob/mantle).

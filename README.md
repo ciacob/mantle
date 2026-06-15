@@ -221,7 +221,7 @@ The stock bundle is injected into every `main(stock)` call. It provides common u
 | `log` | Scoped logger: `.info(msg)`, `.warn(msg)`, `.error(msg)`, `.debug(msg)`. Writes to console and `logs/`. |
 | `env` | Parsed `.env` values merged with shell environment, as a plain object. |
 | `readAsset(relativePath, [opts])` | Read a file from `assets/`. Returns a string by default; pass `{ binary: true }` or `{ encoding: null }` for a `Buffer`. |
-| `shell(command, [opts])` | Run a shell command synchronously. Returns trimmed stdout. Throws on non-zero exit. Accepts `{ cwd, env }`. |
+| `shell(command, [opts])` | Run a shell command synchronously. Returns trimmed stdout. Throws on non-zero exit. Accepts `{ cwd, env }`. Pass `{ stream: true }` for long-running commands (e.g. compilers, package installers) to stream output to the terminal in real time instead of buffering it. |
 | `resolvePath(envKey)` | Resolve an env variable to an absolute path, anchored to **cwd**. See [Path Resolution](#path-resolution). |
 | `resolveAssetPath(envKey)` | Resolve an env variable to an absolute path, anchored to **`assets/`**. See [Path Resolution](#path-resolution). |
 | `paths` | `{ root, assets, logs }` — absolute paths for the descriptor's key directories. |
