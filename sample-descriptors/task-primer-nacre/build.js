@@ -334,6 +334,21 @@ module.exports = {
     log.info('Installing production dependencies for pkg…');
     shell('npm install --omit=dev', { cwd: buildDir, stream: true });
 
+    // Patch yargs' package.json to remove the ESM conditional export.
+    // pkg resolves the `exports` field and picks `index.mjs` (ESM) over
+    // the CJS entrypoint, which then fails inside pkg's snapshot filesystem.
+    // Removing the `exports` field forces Node's legacy resolution to use
+    // the `main` field (index.cjs) instead.
+    const yargsPkgPath = path.join(buildDir, 'node_modules', 'yargs', 'package.json');
+    if (await exists(fs, yargsPkgPath)) {
+      const yargsPkg = JSON.parse(await fs.readFile(yargsPkgPath, 'utf8'));
+      if (yargsPkg.exports) {
+        delete yargsPkg.exports;
+        await fs.writeFile(yargsPkgPath, JSON.stringify(yargsPkg, null, 2), 'utf8');
+        log.info('Patched yargs/package.json: removed exports field for pkg compatibility');
+      }
+    }
+
     // ── Step 4: Run pkg ─────────────────────────────────────────────────────
 
     const pkgTarget = env.PKG_TARGET || 'node20-macos-arm64';
