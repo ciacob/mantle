@@ -165,6 +165,20 @@ test('patchPackageJson: preserves top-level package.json fields', () => {
   assert.deepEqual(result.scripts, { test: 'jest' });
 });
 
+test('patchPackageJson: adds pkg.assets with ui and tasks', () => {
+  const result = patchPackageJson({ name: 'myapp' }, 'com.example.app');
+  assert.ok(Array.isArray(result.pkg.assets));
+  assert.ok(result.pkg.assets.includes('ui/**'));
+  assert.ok(result.pkg.assets.includes('tasks/**'));
+});
+
+test('patchPackageJson: merges with existing pkg.assets', () => {
+  const pkg = { pkg: { assets: ['custom/**'] } };
+  const result = patchPackageJson(pkg, 'com.example.app');
+  assert.ok(result.pkg.assets.includes('custom/**'));
+  assert.ok(result.pkg.assets.includes('ui/**'));
+});
+
 test('patchPackageJson: adds bin field from main when bin is absent', () => {
   const result = patchPackageJson({ name: 'myapp', main: 'main.js' }, 'com.example.app');
   assert.equal(result.bin, 'main.js');

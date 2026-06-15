@@ -85,6 +85,17 @@ function patchPackageJson(pkgJson, bundleId) {
     ...pkgJson,
     // pkg requires a `bin` field to locate the entry point
     bin: pkgJson.bin || mainFile,
+    // Declare dynamically-loaded assets so pkg bundles them into the binary.
+    // ui/ contains the web frontend; tasks/ contains user task modules.
+    // Adjust if your project uses different paths.
+    pkg: {
+      ...(pkgJson.pkg || {}),
+      assets: [
+        ...((pkgJson.pkg && pkgJson.pkg.assets) || []),
+        'ui/**',
+        'tasks/**',
+      ],
+    },
     taskPrimer: {
       ...tp,
       appBundleId: bundleId,
@@ -302,9 +313,13 @@ module.exports = {
     const buildDir = path.join(outputDir, '_build');
     await fs.rm(buildDir, { recursive: true, force: true });
     await fs.mkdir(buildDir, { recursive: true });
-    shell(`cp -R "${sourceDir}/." "${buildDir}"`);
-    // Remove node_modules — we reinstall below so pkg gets a clean, minimal tree
-    await fs.rm(path.join(buildDir, 'node_modules'), { recursive: true, force: true });
+
+    // Exclude .git, .browsers (large, not needed for packaging) and
+    // any existing node_modules (reinstalled below for a clean prod tree).
+    shell(
+      `rsync -a --exclude='.git' --exclude='.browsers' --exclude='node_modules' ` +
+      `"${sourceDir}/" "${buildDir}/"`
+    );
     log.info(`Build location : ${buildDir}`);
 
     // ── Step 3: Patch package.json ──────────────────────────────────────────
@@ -326,19 +341,41 @@ module.exports = {
     log.info(`Target         : ${pkgTarget}`);
     log.warn('First run may take ~10 min to build the Node.js base binary from source.');
     log.warn('Subsequent runs use the pkg cache and complete in seconds.');
+    log.info('pkg output is suppressed — compiler warnings are expected and harmless.');
 
     const macOSDir   = path.join(outputDir, '_macos');
     const binaryName = safeName(env.APP_NAME);
     const binaryPath = path.join(macOSDir, binaryName);
 
     await fs.mkdir(macOSDir, { recursive: true });
-    shell(
-      `"${env.PKG_BIN}" "${pkgJsonBuild}" ` +
-      `--target ${pkgTarget} ` +
-      `--no-bytecode ` +
-      `--output "${binaryPath}"`,
-      { cwd: buildDir, stream: true }
-    );
+
+    // Run pkg in a child process with stdio fully suppressed.
+    // The compiler flood (thousands of C++ lines) is expected and harmless —
+    // surfacing it swamps the terminal and log files to no benefit.
+    // On failure we get the exit code; the user can run pkg manually to see details.
+    await new Promise((resolve, reject) => {
+      const { spawn } = require('node:child_process');
+      const pkgArgs = [
+        pkgJsonBuild,
+        '--target',    pkgTarget,
+        '--output',    binaryPath,
+      ];
+      log.info(`Running: ${env.PKG_BIN} ${pkgArgs.join(' ')}`);
+      const child = spawn(env.PKG_BIN, pkgArgs, {
+        cwd:   buildDir,
+        stdio: 'ignore',   // suppress all output
+      });
+      child.on('error', (err) => reject(new Error(`pkg spawn error: ${err.message}`)));
+      child.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(
+          `pkg exited with code ${code}.\n` +
+          `  Run manually to see details:\n` +
+          `  cd "${buildDir}" && ${env.PKG_BIN} "${pkgJsonBuild}" ` +
+          `--target ${pkgTarget} --output "${binaryPath}"`
+        ));
+      });
+    });
     log.info(`Mach-O binary  : ${binaryPath}`);
 
     // ── Step 5: Assemble outer .app bundle ──────────────────────────────────
