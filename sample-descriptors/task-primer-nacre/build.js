@@ -94,6 +94,9 @@ function patchPackageJson(pkgJson, bundleId) {
         ...((pkgJson.pkg && pkgJson.pkg.assets) || []),
         'ui/**',
         'tasks/**',
+        'server/**',
+        'worker/**',
+        'shared/**',
       ],
     },
     taskPrimer: {
