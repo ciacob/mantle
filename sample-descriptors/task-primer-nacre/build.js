@@ -382,23 +382,46 @@ module.exports = {
 
     log.info('Step 5/9 — Assembling outer .app bundle');
 
-    const appBundle = path.join(outputDir, `${env.APP_NAME}.app`);
-    const contents  = path.join(appBundle,  'Contents');
-    const appMacOS  = path.join(contents,   'MacOS');
-    const appRes    = path.join(contents,   'Resources');
+    const appName    = env.APP_NAME;
+    const appBundle  = path.join(outputDir, `${appName}.app`);
+    const contents   = path.join(appBundle, 'Contents');
+    const appMacOS   = path.join(contents,  'MacOS');
+    const appRes     = path.join(contents,  'Resources');
 
     await fs.rm(appBundle, { recursive: true, force: true });
     await fs.mkdir(appMacOS, { recursive: true });
     await fs.mkdir(appRes,   { recursive: true });
 
-    await fs.copyFile(binaryPath, path.join(appMacOS, binaryName));
-    shell(`chmod +x "${path.join(appMacOS, binaryName)}"`);
+    // The real Mach-O binary is stored with a "-bin" suffix.
+    const realBinaryDest = path.join(appMacOS, binaryName + '-bin');
+    await fs.copyFile(binaryPath, realBinaryDest);
+    shell(`chmod +x "${realBinaryDest}"`);
 
+    // Write a launcher shell script as CFBundleExecutable.
+    // macOS has no built-in mechanism for passing fixed arguments to a .app
+    // binary at launch time, so we use a thin shell wrapper that always
+    // passes --ui --autoexit — the flags task-primer requires to run as a
+    // UI application and exit cleanly when the window is closed.
+    // Any arguments passed by macOS (e.g. -psn_* process serial number) are
+    // forwarded via "$@" so the system handshake still works.
+    const launcherPath = path.join(appMacOS, binaryName);
+    const launcherScript = [
+      '#!/bin/sh',
+      `# Launcher for ${appName}`,
+      `# Always runs task-primer in UI mode with clean exit on window close.`,
+      `DIR="$(cd "$(dirname "$0")" && pwd)"`,
+      `exec "$DIR/${binaryName}-bin" --ui --autoexit "$@"`,
+    ].join('\n') + '\n';
+
+    await fs.writeFile(launcherPath, launcherScript, 'utf8');
+    shell(`chmod +x "${launcherPath}"`);
+
+    // Info.plist — CFBundleExecutable points to the launcher script
     const plist = outerInfoPlist({
-      appName:    env.APP_NAME,
+      appName,
       bundleId:   env.APP_BUNDLE_ID,
       version:    env.APP_VERSION,
-      executable: binaryName,
+      executable: binaryName,   // same name as launcher
     });
     await fs.writeFile(path.join(contents, 'Info.plist'), plist, 'utf8');
     shell(`cp "${iconPath}" "${path.join(appRes, 'AppIcon.icns')}"`);
