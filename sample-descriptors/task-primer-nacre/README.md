@@ -92,6 +92,7 @@ cp .env.template .env
 | `PKG_BIN` | ✓ | Path to the pkg binary (default: `pkg` if globally installed). |
 | `PKG_TARGET` | | pkg target string. Default: `node20-macos-arm64`. The first run builds the Node base binary from source (~10 min); subsequent runs use the pkg cache and are fast. |
 | `APPLE_IDENTITY` | | Developer ID Application identity for codesign (e.g. `Developer ID Application: Your Name (TEAMID)`). Leave blank to skip signing. |
+| `ENTITLEMENTS_PLIST` | | Path to the entitlements `.plist`. Default: `entitlements.plist` (resolves to `assets/entitlements.plist`). The default grants the JIT entitlement required by V8. Override only if your app needs additional entitlements. |
 | `APPLE_ID` | | Apple ID email for notarytool. Leave blank to skip notarization. |
 | `APPLE_PASSWORD` | | App-specific password for notarytool. **Set in the shell, never in `.env`.** |
 | `APPLE_TEAM_ID` | | Apple Developer Team ID for notarytool. |
@@ -187,6 +188,23 @@ merges rather than replaces any existing `pkg.assets` entries.
 
 pkg downloads and compiles the Node.js base binary from source on first run (~10 min
 on Apple Silicon). The result is cached in `~/.pkg-cache`. Subsequent runs are fast.
+
+**4. The hardened runtime requires a JIT entitlement.**
+
+pkg embeds V8 (the Node.js JavaScript engine), which requires writable and
+executable memory for JIT compilation. The macOS hardened runtime (enabled by
+`--options runtime` during codesign) blocks this by default. Without the
+`com.apple.security.cs.allow-jit` entitlement the app crashes immediately on
+launch with:
+
+```
+Fatal process OOM in Failed to reserve virtual memory for CodeRange
+```
+
+The `assets/entitlements.plist` file in this descriptor grants this entitlement
+(along with two others required by pkg's snapshot loader). It is applied
+automatically to the Mach-O binary and the outer `.app` bundle during signing.
+No action required unless your app needs additional entitlements.
 
 ---
 

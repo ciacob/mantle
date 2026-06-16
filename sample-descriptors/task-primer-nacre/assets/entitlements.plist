@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+  <!--
+    Allow Just-In-Time (JIT) compilation of JavaScript.
+    Required by V8 (embedded inside the pkg-built Node.js binary).
+    Without this, the hardened runtime blocks V8's writable+executable
+    memory mapping and the process crashes immediately on launch with
+    "Fatal process OOM in Failed to reserve virtual memory for CodeRange".
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+
+  <!--
+    Allow the process to execute unsigned code in memory.
+    Required by pkg's snapshot loader which maps bundle content
+    into memory at runtime.
+  -->
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!--
+    Allow dyld environment variables (DYLD_INSERT_LIBRARIES etc.).
+    Required by some native Node addons. Safe to include; does not
+    weaken the security of the app meaningfully for a desktop tool.
+  -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+
+</dict>
+</plist>

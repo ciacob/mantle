@@ -471,35 +471,45 @@ module.exports = {
     if (canSign) {
       log.info('Step 8/9 — Code-signing');
 
-      const identity  = env.APPLE_IDENTITY;
-      const signFlags = `--force --sign "${identity}" --options runtime --timestamp`;
+      const identity     = env.APPLE_IDENTITY;
+      const entitlements = stock.resolveAssetPath('ENTITLEMENTS_PLIST');
+      const signFlags    = `--force --sign "${identity}" --options runtime --timestamp`;
+      const withEnt      = `${signFlags} --entitlements "${entitlements}"`;
 
       // Sign inside-out: innermost binaries first, outermost bundle last.
       // --deep is intentionally avoided — it is a legacy option that does not
       // reliably sign standalone Mach-O binaries that are not themselves .app bundles.
 
       // 1. nacre binary (inside the nested nacre .app bundle)
+      // nacre is a Cocoa/WebKit app — it does not need JIT entitlements,
+      // but we sign it with the same flags for consistency.
       const nacreBinary = path.join(appRes, `${env.APP_NAME}.app`,
                                     'Contents', 'MacOS', 'nacre');
-      log.info(`Signing nacre binary…`);
+      log.info('Signing nacre binary…');
       shell(`codesign ${signFlags} "${nacreBinary}"`);
 
       // 2. The nacre .app bundle itself
       const nacreBundleInApp = path.join(appRes, `${env.APP_NAME}.app`);
-      log.info(`Signing nacre bundle…`);
+      log.info('Signing nacre bundle…');
       shell(`codesign ${signFlags} "${nacreBundleInApp}"`);
 
-      // 3. The real Mach-O binary (task-primer, packaged by pkg)
+      // 3. The real Mach-O binary (task-primer, packaged by pkg).
+      // This binary embeds V8 (Node.js JIT) and requires the JIT entitlement.
+      // Without com.apple.security.cs.allow-jit the hardened runtime blocks
+      // V8's writable+executable memory mapping and the process crashes
+      // immediately with "Fatal process OOM in Failed to reserve virtual
+      // memory for CodeRange".
       const realBinary = path.join(appMacOS, binaryName + '-bin');
-      log.info(`Signing Mach-O binary…`);
-      shell(`codesign ${signFlags} "${realBinary}"`);
+      log.info('Signing Mach-O binary (with JIT entitlements)…');
+      shell(`codesign ${withEnt} "${realBinary}"`);
 
       // 4. The launcher shell script is not a Mach-O — no signing needed.
       //    codesign would reject it as "not a Mach-O file".
 
-      // 5. The outer .app bundle — must be last
-      log.info(`Signing outer .app bundle…`);
-      shell(`codesign ${signFlags} "${appBundle}"`);
+      // 5. The outer .app bundle — must be last, also needs entitlements
+      //    so Gatekeeper sees them at the top level.
+      log.info('Signing outer .app bundle…');
+      shell(`codesign ${withEnt} "${appBundle}"`);
 
       // Verify the result
       shell(`codesign --verify --deep --strict "${appBundle}"`);
