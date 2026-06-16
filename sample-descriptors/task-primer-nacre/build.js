@@ -89,9 +89,6 @@ function patchPackageJson(pkgJson, bundleId, appName) {
     ...pkgJson,
     // pkg requires a `bin` field to locate the entry point
     bin: pkgJson.bin || mainFile,
-    // Declare dynamically-loaded assets so pkg bundles them into the binary.
-    // ui/ contains the web frontend; tasks/ contains user task modules.
-    // Adjust if your project uses different paths.
     pkg: {
       ...(pkgJson.pkg || {}),
       assets: [
@@ -473,11 +470,40 @@ module.exports = {
 
     if (canSign) {
       log.info('Step 8/9 — Code-signing');
-      shell(
-        `codesign --deep --force --sign "${env.APPLE_IDENTITY}" ` +
-        `--options runtime "${appBundle}"`
-      );
-      log.info('Code-signing complete');
+
+      const identity  = env.APPLE_IDENTITY;
+      const signFlags = `--force --sign "${identity}" --options runtime --timestamp`;
+
+      // Sign inside-out: innermost binaries first, outermost bundle last.
+      // --deep is intentionally avoided — it is a legacy option that does not
+      // reliably sign standalone Mach-O binaries that are not themselves .app bundles.
+
+      // 1. nacre binary (inside the nested nacre .app bundle)
+      const nacreBinary = path.join(appRes, `${env.APP_NAME}.app`,
+                                    'Contents', 'MacOS', 'nacre');
+      log.info(`Signing nacre binary…`);
+      shell(`codesign ${signFlags} "${nacreBinary}"`);
+
+      // 2. The nacre .app bundle itself
+      const nacreBundleInApp = path.join(appRes, `${env.APP_NAME}.app`);
+      log.info(`Signing nacre bundle…`);
+      shell(`codesign ${signFlags} "${nacreBundleInApp}"`);
+
+      // 3. The real Mach-O binary (task-primer, packaged by pkg)
+      const realBinary = path.join(appMacOS, binaryName + '-bin');
+      log.info(`Signing Mach-O binary…`);
+      shell(`codesign ${signFlags} "${realBinary}"`);
+
+      // 4. The launcher shell script is not a Mach-O — no signing needed.
+      //    codesign would reject it as "not a Mach-O file".
+
+      // 5. The outer .app bundle — must be last
+      log.info(`Signing outer .app bundle…`);
+      shell(`codesign ${signFlags} "${appBundle}"`);
+
+      // Verify the result
+      shell(`codesign --verify --deep --strict "${appBundle}"`);
+      log.info('Code-signing complete and verified');
     } else {
       log.warn('Step 8/9 — Skipped (APPLE_IDENTITY not set)');
     }
@@ -486,18 +512,103 @@ module.exports = {
 
     if (canNotarize) {
       log.info('Step 9/9 — Notarizing');
+
+      // Zip for submission
       const zipPath = `${appBundle}.zip`;
       shell(`ditto -c -k --keepParent "${appBundle}" "${zipPath}"`);
-      shell(
-        `xcrun notarytool submit "${zipPath}" ` +
-        `--apple-id "${env.APPLE_ID}" ` +
-        `--password "${env.APPLE_PASSWORD}" ` +
-        `--team-id "${env.APPLE_TEAM_ID}" ` +
-        `--wait`
-      );
-      shell(`xcrun stapler staple "${appBundle}"`);
+      log.info(`Submission zip : ${zipPath}`);
+
+      // Submit and wait — capture output so we can extract the submission ID
+      // and show it regardless of success or failure.
+      log.info('Submitting to Apple notary service (this takes 1–5 minutes)…');
+      let submitOutput = '';
+      try {
+        submitOutput = shell(
+          `xcrun notarytool submit "${zipPath}" ` +
+          `--apple-id "${env.APPLE_ID}" ` +
+          `--password "${env.APPLE_PASSWORD}" ` +
+          `--team-id "${env.APPLE_TEAM_ID}" ` +
+          `--wait`
+        );
+      } catch (submitErr) {
+        // Extract and log the submission ID even on failure so the user
+        // can query Apple's log manually.
+        const idMatch = submitErr.message.match(/id: ([0-9a-f-]{36})/i);
+        if (idMatch) {
+          log.error(`Submission ID  : ${idMatch[1]}`);
+          log.error(`Retrieve log   : xcrun notarytool log ${idMatch[1]} ` +
+            `--apple-id "${env.APPLE_ID}" ` +
+            `--password "${env.APPLE_PASSWORD}" ` +
+            `--team-id "${env.APPLE_TEAM_ID}"`);
+        }
+        throw submitErr;
+      }
+
+      // Extract and log the submission ID from successful output
+      const idMatch = submitOutput.match(/id: ([0-9a-f-]{36})/i);
+      const submissionId = idMatch ? idMatch[1] : '(unknown)';
+      log.info(`Submission ID  : ${submissionId}`);
+
+      // Check for explicit rejection in the output
+      if (/status: Invalid/i.test(submitOutput)) {
+        log.error('Notarization rejected by Apple. Fetching detailed log…');
+        try {
+          const notaryLog = shell(
+            `xcrun notarytool log "${submissionId}" ` +
+            `--apple-id "${env.APPLE_ID}" ` +
+            `--password "${env.APPLE_PASSWORD}" ` +
+            `--team-id "${env.APPLE_TEAM_ID}"`
+          );
+          log.error('Notarization log:\n' + notaryLog);
+        } catch (logErr) {
+          log.warn(`Could not retrieve notarization log: ${logErr.message}`);
+        }
+        throw new Error(
+          `Notarization rejected. Submission ID: ${submissionId}\n` +
+          `Review the log above, fix the issues, and rebuild.`
+        );
+      }
+
+      log.info('Notarization accepted. Stapling ticket to bundle…');
       await fs.rm(zipPath, { force: true });
-      log.info('Notarization and stapling complete');
+
+      // Staple with retry — Apple's CDN can take a moment to propagate the
+      // ticket after notarytool reports success. Retry up to 5 times with
+      // 15-second gaps before giving up.
+      const maxStapleAttempts = 5;
+      const stapleDelayMs     = 15_000;
+      let stapled = false;
+
+      for (let attempt = 1; attempt <= maxStapleAttempts; attempt++) {
+        try {
+          shell(`xcrun stapler staple "${appBundle}"`);
+          stapled = true;
+          break;
+        } catch (stapleErr) {
+          if (attempt < maxStapleAttempts) {
+            log.warn(
+              `Staple attempt ${attempt}/${maxStapleAttempts} failed ` +
+              `(ticket not yet propagated) — retrying in ${stapleDelayMs / 1000}s…`
+            );
+            await new Promise((r) => setTimeout(r, stapleDelayMs));
+          } else {
+            log.error(`Stapling failed after ${maxStapleAttempts} attempts.`);
+            log.error(
+              `You can staple manually once the ticket propagates:\n` +
+              `  xcrun stapler staple "${appBundle}"`
+            );
+            throw stapleErr;
+          }
+        }
+      }
+
+      if (stapled) {
+        log.info('Notarization and stapling complete');
+        log.info(
+          `Verify: xcrun stapler validate "${appBundle}"`
+        );
+      }
+
     } else {
       log.warn('Step 9/9 — Skipped (notarization credentials not set)');
     }
