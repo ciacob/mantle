@@ -43,6 +43,32 @@ MyApp.app/
 
 ---
 
+## No App Store compatibility
+
+**Apps built with this descriptor cannot be submitted to the Mac App Store.**
+
+This is an architectural limitation with no workaround. The pkg-built binary
+embeds Node.js and the V8 JavaScript engine, which requires JIT compilation
+(`com.apple.security.cs.allow-jit`). The App Store sandbox explicitly prohibits
+JIT — apps may not generate and execute code at runtime. All three entitlements
+in `assets/entitlements.plist` are similarly prohibited under App Store rules.
+
+This affects any app that embeds a JavaScript runtime (Electron, NW.js, and
+similar frameworks face the same restriction).
+
+**What you get instead** is Developer ID distribution with full notarization —
+Apple scans the binary for malware, issues a signed ticket, and Gatekeeper
+verifies it on every user's machine. For the vast majority of developer tools
+and internal applications this is the correct distribution path, and it is
+exactly what this pipeline produces.
+
+If App Store distribution is a hard requirement, the architecture would need to
+change fundamentally — the Node.js host process would need to be replaced with a
+native macOS app, with web functionality confined entirely to WKWebView (which
+nacre already provides for the UI layer).
+
+---
+
 ## Prerequisites
 
 - macOS 13+
@@ -184,11 +210,6 @@ If your project adds other dynamically-loaded files, declare them in the source
 project's `package.json` under `pkg.assets` before running the build — the descriptor
 merges rather than replaces any existing `pkg.assets` entries.
 
-**3. First run is slow.**
-
-pkg downloads and compiles the Node.js base binary from source on first run (~10 min
-on Apple Silicon). The result is cached in `~/.pkg-cache`. Subsequent runs are fast.
-
 **4. The hardened runtime requires a JIT entitlement.**
 
 pkg embeds V8 (the Node.js JavaScript engine), which requires writable and
@@ -205,6 +226,9 @@ The `assets/entitlements.plist` file in this descriptor grants this entitlement
 (along with two others required by pkg's snapshot loader). It is applied
 automatically to the Mach-O binary and the outer `.app` bundle during signing.
 No action required unless your app needs additional entitlements.
+
+pkg downloads and compiles the Node.js base binary from source on first run (~10 min
+on Apple Silicon). The result is cached in `~/.pkg-cache`. Subsequent runs are fast.
 
 ---
 
